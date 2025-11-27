@@ -14,19 +14,23 @@ con.load_extension("spatial")
 city_url = "https://data.gishub.org/duckdb/cities.csv"
 country_list_url = 'https://data.gishub.org/duckdb/countries.csv' 
 
-# 創建城市資料表 (city_geom)
+
+# 2a. 創建城市資料表 (city_geom) - 標準化國家名稱
 con.sql(f"""
     CREATE OR REPLACE TABLE city_geom AS
     SELECT
         *,
+        TRIM(UPPER(country)) AS country_normalized, -- 標準化：轉大寫並移除空格
         ST_Point(longitude, latitude) AS geom
     FROM read_csv_auto('{city_url}');
 """)
 
-# 創建國家代碼對應表 (country_codes)
+# 2b. 創建國家代碼對應表 (country_codes) - 標準化國家名稱
 con.sql(f"""
     CREATE OR REPLACE TABLE country_codes AS
-    SELECT *
+    SELECT 
+        *,
+        TRIM(UPPER(country)) AS country_normalized -- 標準化：轉大寫並移除空格
     FROM read_csv_auto('{country_list_url}');
 """)
 
@@ -61,12 +65,14 @@ def create_map_instance():
     return m
 
 def get_cities_data(selected_alpha3_code, db_conn):
-    """根據 Alpha3_code 查詢城市經緯度 (使用 JOIN)"""
-    # SQL 查詢邏輯不變
+    """
+    使用標準化後的 country_normalized 欄位進行聯接。
+    """
     query = f"""
-        SELECT T2.latitude, T2.longitude, T2.country
-        FROM country_codes AS T1
-        JOIN city_geom AS T2 ON T1.country = T2.country
+        SELECT T2.latitude, T2.longitude, T2.country_normalized
+        FROM country_codes AS T1 
+        -- *** 修正: 在聯接點使用標準化後的欄位 ***
+        JOIN city_geom AS T2 ON T1.country_normalized = T2.country_normalized 
         WHERE T1.Alpha3_code = '{selected_alpha3_code}'
     """
     try:
