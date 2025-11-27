@@ -32,7 +32,7 @@ country_list = [row[0] for row in country_query_result.fetchall()]
 
 # 4. 初始化響應式變數
 # 設置初始值為列表中的第一個國家，若列表為空則預設為 "Taiwan"
-initial_country = country_list[0] if country_list else "Taiwan"
+initial_country = country_list[0] if country_list else "TWN"
 country = solara.reactive(initial_country)
 
 
