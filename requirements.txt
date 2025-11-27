@@ -1,0 +1,10 @@
+pandas
+plotly
+geopandas
+leafmap>=0.49.2
+ipyleaflet
+maplibre
+rasterio
+rioxarray
+solara
+widgetsnbextension
