@@ -101,37 +101,45 @@ def get_cities_data(selected_alpha3_code, db_conn):
 
 @solara.component
 def Page():
-    # 1. 地圖實例: 使用 use_memo 確保地圖只創建一次
+    # 1. 地圖實例: 
     m = solara.use_memo(create_map_instance, dependencies=[])
     
-    # 2. 響應式效果: 監聽 country.value (Alpha3_code) 的變化
+    # 2. 響應式效果: (邏輯不變)
     def update_map_layer():
         selected_code = country.value
         geojson_data = get_cities_data(selected_code, con)
         
+        # ... (地圖更新邏輯) ...
         m.remove_layer("selected_cities")
-
         if geojson_data['features']:
-            m.add_geojson(
+             m.add_geojson(
                 geojson_data, 
                 layer_name="selected_cities", 
                 marker_color="red", 
                 radius=5
             )
-            
-            # 定位到選定國家的第一個城市
-            first_coords = geojson_data['features'][0]['geometry']['coordinates']
-            m.set_center(first_coords[0], first_coords[1], zoom=5)
-            
-    # 當 country.value 改變時，觸發更新
+             first_coords = geojson_data['features'][0]['geometry']['coordinates']
+             m.set_center(first_coords[0], first_coords[1], zoom=5)
+
     solara.use_effect(update_map_layer, [country.value])
     
-    # 3. 側邊欄 (UI 控制項)
-    # 由於 Leafmap 已經設置了 add_sidebar=True，這裡使用 solara.Sidebar() 會將 UI 元素放入 Leafmap 的側邊欄中
-    with solara.Sidebar():
-        solara.Select(label="Country (Alpha3_code)", value=country, values=country_list)
-        solara.Markdown(f"**Selected Code**: {country.value}")
+    # *** 修正點：移除 solara.Sidebar()，改為使用 solara.Column 堆疊 UI 和地圖 ***
+    
+    # 3. UI 控制項 (放在地圖上方)
+    controls = solara.Column(
+        children=[
+            solara.Select(label="Country (Alpha3_code)", value=country, values=country_list),
+            solara.Markdown(f"**Selected Code**: {country.value}"),
+        ]
+    )
 
     # 4. 渲染地圖
-    # 使用 m.to_solara() 渲染地圖實例
-    return m.to_solara()
+    map_component = m.to_solara()
+
+    # 5. 組合：垂直堆疊控制項和地圖
+    return solara.Column(
+        children=[
+            controls,  # UI 控制項
+            map_component # 地圖
+        ]
+    )
