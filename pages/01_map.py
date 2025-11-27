@@ -7,18 +7,16 @@ import leafmap.maplibregl as leafmap
 # 設置 DuckDB 連線並保持開放
 con = duckdb.connect(database=':memory:', read_only=False)
 
-# 載入擴展
+# 載入擴展 (只保留 httpfs 和 spatial，移除未使用的 h3)
 con.install_extension("httpfs")
 con.install_extension("spatial")
-con.install_extension("h3", repository="community") 
 con.load_extension("httpfs")
 con.load_extension("spatial")
 
 # 1. 定義資料 URL
 city_url = "https://data.gishub.org/duckdb/cities.csv" 
-# country_list_url 不再需要
 
-# 2. 創建城市資料表 (city_geom) - 假設 country 欄位即為 Alpha3_code
+# 2. 創建城市資料表 (city_geom)
 con.sql(f"""
     CREATE OR REPLACE TABLE city_geom AS
     SELECT
@@ -27,7 +25,7 @@ con.sql(f"""
     FROM read_csv_auto('{city_url}');
 """)
 
-# 3. 獲取不重複的國家代碼列表 (直接從 city_geom 的 country 欄位獲取)
+# 3. 獲取不重複的國家代碼列表
 country_query_result = con.sql(f"""
     SELECT DISTINCT country 
     FROM city_geom
@@ -44,7 +42,7 @@ status_message = solara.reactive("請選擇一個國家...")
 # --- 2. 核心邏輯函式 ---
 
 def create_map_instance():
-    """初始化 Leafmap 地圖實例 (包含用戶提供的所有配置)"""
+    """初始化 Leafmap 地圖實例 (只執行一次)"""
     m = leafmap.Map(
         add_sidebar=True,
         add_floating_sidebar=False,
@@ -57,10 +55,7 @@ def create_map_instance():
     return m
 
 def get_cities_data(selected_alpha3_code, db_conn):
-    """
-    簡化邏輯：根據選定的 Alpha3_code 直接過濾 city_geom 表。
-    """
-    # *** 修正: 直接使用 country 欄位進行過濾 (假設它就是 Alpha3_code) ***
+    """根據選定的 Alpha3_code 直接過濾 city_geom 表。"""
     query = f"""
         SELECT latitude, longitude, country
         FROM city_geom
@@ -100,21 +95,26 @@ def Page():
         m.remove_layer("selected_cities")
         
         if feature_count > 0:
-            # 地圖更新邏輯
+            # 修正後的 add_geojson 樣式設置 (解決 Pydantic 驗證錯誤)
             m.add_geojson(
                 geojson_data, 
-                layer_name="selected_cities", 
-                marker_color="red", 
-                radius=5
+                style={
+                    "type": "circle",
+                    "paint": {
+                        "circle-radius": 5,
+                        "circle-color": "blue",
+                        "circle-opacity": 0.8
+                    }
+                },
+                style_options={"id": "selected_cities"}
             )
+            
             # 定位到選定國家的第一個城市
             first_coords = geojson_data['features'][0]['geometry']['coordinates']
             m.set_center(first_coords[0], first_coords[1], zoom=5)
             
-            # 成功訊息
             status_message.value = f"成功：已找到 {feature_count} 個城市點位！ (代碼: {selected_code})"
         else:
-            # 警告訊息 (現在只會在該代碼下城市數為零時觸發)
             status_message.value = f"警告：未找到城市點位 (代碼: {selected_code})。該國家可能沒有城市數據或資料有誤。"
             
     solara.use_effect(update_map_layer, [country.value])
@@ -124,7 +124,6 @@ def Page():
         children=[
             solara.Select(label="Country (Alpha3_code)", value=country, values=country_list),
             solara.Markdown(f"**Selected Code**: {country.value}"),
-            # 顯示診斷訊息
             solara.Markdown(f"**診斷**: {status_message.value}", style={"color": "red" if "警告" in status_message.value else "green"}), 
         ]
     )
