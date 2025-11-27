@@ -75,20 +75,15 @@ def get_cities_data(country_name, db_conn):
 
 @solara.component
 def Page():
-    # 1. 地圖實例: 使用 use_memo 確保地圖只創建一次
-    m = solara.use_memo(create_map_instance, dependencies=[])
-    
-    # 2. 響應式效果: 監聽 country.value 的變化
+    # 1. 地圖實例：保持使用 use_memo 確保地圖只創建一次
+    m = solara.use_memo(create_map_instance, dependencies=[]) # 假設 create_map_instance 仍是初始化函式
+
+    # 2. 響應式效果：必須保留此邏輯來監聽並更新地圖圖層
     def update_map_layer():
         selected_country = country.value
-        
-        # 獲取城市 GeoJSON 數據
         geojson_data = get_cities_data(selected_country, con)
         
-        # 移除舊的圖層 (以 layer_name 識別)
         m.remove_layer("selected_cities")
-
-        # 加入新的城市點位圖層
         if geojson_data['features']:
             m.add_geojson(
                 geojson_data, 
@@ -96,13 +91,10 @@ def Page():
                 marker_color="red", 
                 radius=5
             )
-            
-            # 定位到選定國家的第一個城市
             first_coords = geojson_data['features'][0]['geometry']['coordinates']
-            # set_center 順序為 (lon, lat, zoom)
             m.set_center(first_coords[0], first_coords[1], zoom=5)
             
-    # 當 country.value 改變時，觸發 update_map_layer 函式
+    # 觸發更新
     solara.use_effect(update_map_layer, [country.value])
     
     # 3. 側邊欄 (UI 控制項)
@@ -110,5 +102,5 @@ def Page():
         solara.Select(label="Country", value=country, values=country_list)
         solara.Markdown(f"**Selected**: {country.value}")
 
-    # 4. 渲染地圖
-    return leafmap.Maplibregl(m)
+    # 4. 渲染地圖：使用 to_solara() 替換 leafmap.Map(m)
+    return m.to_solara()
