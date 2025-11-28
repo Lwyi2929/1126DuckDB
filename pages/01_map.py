@@ -78,7 +78,7 @@ def CityMap(df: pd.DataFrame):
             center=[20, 0],
             add_sidebar=True,
             sidebar_visible=True,
-            height="900px",
+            #height="900px",
             width="100%",
         ),
         []
