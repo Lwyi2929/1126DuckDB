@@ -11,9 +11,9 @@ CITIES_CSV_URL = 'https://data.gishub.org/duckdb/cities.csv'
 # ----------------------------------------------------
 # 1. 狀態管理 (Reactive Variables)
 # ----------------------------------------------------
-all_countries = solara.reactive([])
+all_countries = solara.reactive([])        # 所有不重複的國家代碼列表
 selected_country = solara.reactive("TWN")  # 預設為 'TWN'
-data_df = solara.reactive(pd.DataFrame()) 
+data_df = solara.reactive(pd.DataFrame()) # 當前城市的數據 DataFrame
 status_message = solara.reactive("初始化中...")
 
 # ----------------------------------------------------
@@ -34,9 +34,10 @@ def load_country_list():
             ORDER BY country;
         """).fetchall()
         
-        all_countries.set([row[0] for row in result])
+        country_list = [row[0] for row in result]
+        all_countries.set(country_list)
         
-        if not all_countries.value:
+        if not country_list:
              status_message.set("警告：國家列表為空。")
              
         con.close()
@@ -95,7 +96,7 @@ def CityMap(df: pd.DataFrame):
     def update_map_layer():
         LAYER_ID = "selected_cities_points"
         SOURCE_ID = "cities_data_source"
-        
+
         # 1. 清除舊圖層和來源
         try:
              m.remove_layer(LAYER_ID)
@@ -107,24 +108,34 @@ def CityMap(df: pd.DataFrame):
             status_message.set(f"警告：未找到城市點位 (代碼: {selected_country.value})。")
             return
             
-        # 2. 數據轉換為 GeoJSON 字典
+        # 2. 數據轉換為 GeoJSON 字典 (已加入顯式類型轉換，解決渲染問題)
         features = []
         center_coords = None
         for index, row in df.iterrows():
-            lon, lat = row["longitude"], row["latitude"]
+            try:
+                # 關鍵修正：確保經緯度是標準 Python float 類型
+                lon, lat = float(row["longitude"]), float(row["latitude"])
+                population = int(row["population"]) if pd.notna(row.get("population")) else None
+            except Exception:
+                continue # 跳過無效行
+            
             if center_coords is None:
                 center_coords = [lon, lat]
                 
             features.append({
                 "type": "Feature",
-                "geometry": {"type": "Point", "coordinates": [lon, lat]}, 
+                "geometry": {"type": "Point", "coordinates": [lon, lat]}, # [lon, lat] 順序
                 "properties": {
                     "name": row["name"],
                     "country": row["country"],
-                    "population": row.get("population", None)
+                    "population": population
                 }
             })
         geojson = {"type": "FeatureCollection", "features": features}
+
+        if not features:
+            status_message.set(f"警告：所有城市數據轉換失敗，未繪製點位 (代碼: {selected_country.value})。")
+            return
         
         # 3. 添加新的數據源和圖層
         m.add_source(SOURCE_ID, geojson) 
@@ -145,7 +156,7 @@ def CityMap(df: pd.DataFrame):
         if center_coords:
             m.set_center(center_coords[0], center_coords[1], zoom=5)
             
-        status_message.set(f"成功：已找到 {len(df)} 個城市點位！ (代碼: {selected_country.value})")
+        status_message.set(f"成功：已找到 {len(features)} 個城市點位！ (代碼: {selected_country.value})")
 
     solara.use_effect(update_map_layer, [df.values.tolist()]) 
     
