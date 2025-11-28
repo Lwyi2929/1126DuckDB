@@ -144,11 +144,7 @@ def CityMap(df: pd.DataFrame):
         # ⭐ 關鍵修正：替換為單一 m.add_geojson 呼叫
         # 嘗試使用 layer_name 來確保 remove_layer 能夠工作
         m.add_geojson(
-            geojson,
-            layer_name=LAYER, 
-            marker_color="red",
-            marker_size=6,
-            popup=True # 啟用彈出視窗
+            geojson
         )
 
         # 自動 zoom to bounds
