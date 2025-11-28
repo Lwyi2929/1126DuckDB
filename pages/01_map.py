@@ -149,8 +149,7 @@ def CityMap(df: pd.DataFrame):
         if len(lats) > 0:
             min_lat, max_lat = min(lats), max(lats)
             min_lon, max_lon = min(lons), max(lons)
-            # set_bounds 接受 [[min_lon, min_lat], [max_lon, max_lat]]
-            m.set_bounds([[min_lon, min_lat], [max_lon, max_lat]])
+            m.fit_bounds([[min_lon, min_lat], [max_lon, max_lat]])
 
     # 監聽 df 內容的變化
     solara.use_effect(update_layer, [df]) 
