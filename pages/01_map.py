@@ -166,7 +166,7 @@ def CityMap(df: pd.DataFrame):
     return m.to_solara()
 
 # ----------------------------------------------------
-# 4. 主頁面組件
+# 4. 主頁面組件 (修正後的版本)
 # ----------------------------------------------------
 
 @solara.component
@@ -177,7 +177,11 @@ def Page():
     # B. 當 selected_country 改變時，載入篩選後的數據
     solara.use_effect(load_filtered_data, [selected_country.value])
     
-    # 1. UI 控制項 (Select, Selected Code, Status Message)
+    # 檢查國家列表是否載入。如果沒有，顯示載入訊息。
+    if not all_countries.value:
+        return solara.Info("正在載入國家列表，請稍候...")
+
+    # 1. UI 控制項
     controls = solara.Column(
         children=[
             solara.Select(label="Country (Alpha3_code)", value=selected_country, values=all_countries.value),
@@ -189,7 +193,7 @@ def Page():
         ]
     )
 
-    # 2. 城市數據表格 (新增：需求 1)
+    # 2. 城市數據表格 (僅在數據非空時顯示)
     city_table = None
     if not data_df.value.empty:
         # 選擇需要的欄位並重新命名
@@ -206,7 +210,7 @@ def Page():
     # 3. 渲染地圖組件
     map_display = CityMap(df=data_df.value)
 
-    # 4. 組合：控制項 -> 表格 -> 地圖 (垂直堆疊)
+    # 4. 組合：控制項 -> 表格 -> 地圖
     return solara.Column(
         children=[
             controls,
