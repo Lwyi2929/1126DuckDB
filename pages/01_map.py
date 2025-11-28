@@ -1,26 +1,26 @@
 import solara
 import duckdb
 import pandas as pd
-import plotly.express as px 
 import leafmap.maplibregl as leafmap
 import numpy as np
 
-# -----------------------------------------------------------
-# 設定
-# -----------------------------------------------------------
+# ----------------------------------------------------
+# 0. 常量
+# ----------------------------------------------------
 CITIES_CSV_URL = 'https://data.gishub.org/duckdb/cities.csv'
 
+# ----------------------------------------------------
+# 1. 狀態管理 (Reactive Variables)
+# ----------------------------------------------------
 all_countries = solara.reactive([])
 selected_country = solara.reactive("TWN")
 data_df = solara.reactive(pd.DataFrame())
 status_message = solara.reactive("初始化中...")
 
+# ----------------------------------------------------
+# 2. 數據獲取邏輯 (不變)
+# ----------------------------------------------------
 
-# -----------------------------------------------------------
-# 2. 數據獲取邏輯
-# -----------------------------------------------------------
-
-# A. 載入所有國家清單
 def load_country_list():
     status_message.set("正在載入國家列表...")
     try:
@@ -43,7 +43,6 @@ def load_country_list():
     except Exception as e:
         status_message.set(f"錯誤：無法載入國家列表 {e}")
 
-# B. 根據選中的國家篩選城市數據
 def load_filtered_data():
     code = selected_country.value
     if not code:
@@ -56,14 +55,13 @@ def load_filtered_data():
         con.install_extension("httpfs")
         con.load_extension("httpfs")
         
-        # ⭐ 修正點：移除 SQL 查詢字串結尾的 Python 註釋
         sql_query = f"""
         SELECT name, country, population, latitude, longitude
         FROM '{CITIES_CSV_URL}'
         WHERE country = '{code}'
         ORDER BY population DESC
-        LIMIT 200; 
-        """ 
+        LIMIT 200;
+        """
         df_result = con.sql(sql_query).df()
         
         df_result["latitude"] = df_result["latitude"].astype(float)
@@ -77,9 +75,8 @@ def load_filtered_data():
         status_message.set(f"錯誤：載入城市資料失敗 {e}")
         data_df.set(pd.DataFrame())
 
-
 # -----------------------------------------------------------
-# 3. 視覺化組件
+## 🗺️ 地圖元件
 # -----------------------------------------------------------
 @solara.component
 def CityMap(df: pd.DataFrame):
@@ -98,18 +95,16 @@ def CityMap(df: pd.DataFrame):
     if not hasattr(m, '_initialized_base_layers'):
         m.add_basemap("Esri.WorldImagery", before_id=m.first_symbol_layer_id, visible=False)
         m.add_draw_control(controls=["polygon", "trash"])
-        #m.layout.height = "900px" 
+        m.layout.height = "900px" 
         m._initialized_base_layers = True
 
 
     def update_layer():
         LAYER = "city_points"
-        SOURCE = "city_source"
-
-        # 移除舊圖層
+        
+        # 移除舊圖層 (僅移除 Layer，不移除 Source)
         try:
             m.remove_layer(LAYER)
-            m.remove_source(SOURCE)
         except Exception:
             pass
 
@@ -120,9 +115,13 @@ def CityMap(df: pd.DataFrame):
         lats, lons = [], []
         
         # 轉換 GeoJSON
-        for _, row in df.iterrows():
-            lat = row["latitude"]
-            lon = row["longitude"]
+        for index, row in df.iterrows():
+            try:
+                lon, lat = float(row["longitude"]), float(row["latitude"])
+                population = int(row["population"]) if pd.notna(row.get("population")) else None
+            except Exception:
+                continue 
+            
             lats.append(lat)
             lons.append(lon)
 
@@ -131,38 +130,41 @@ def CityMap(df: pd.DataFrame):
                 "geometry": {"type": "Point", "coordinates": [lon, lat]},
                 "properties": {
                     "name": row["name"],
-                    "population": row["population"],
-                },
+                    "country": row["country"],
+                    "population": population
+                }
             })
 
         geojson = {"type": "FeatureCollection", "features": features}
 
-        # 添加數據源和圖層
-        m.add_source(SOURCE, geojson)
-        m.add_layer({
-            "id": LAYER,
-            "type": "circle",
-            "source": SOURCE,
-            "paint": {
-                "circle-radius": 6,
-                "circle-color": "red",
-                "circle-opacity": 0.9,
-            },
-        })
+        if not features:
+            status_message.set(f"警告：所有城市數據轉換失敗，未繪製點位 (代碼: {selected_country.value})。")
+            return
+            
+        # ⭐ 關鍵修正：替換為單一 m.add_geojson 呼叫
+        # 嘗試使用 layer_name 來確保 remove_layer 能夠工作
+        m.add_geojson(
+            geojson,
+            layer_name=LAYER, 
+            marker_color="red",
+            marker_size=6,
+            popup=True # 啟用彈出視窗
+        )
 
         # 自動 zoom to bounds
         if len(lats) > 0:
             min_lat, max_lat = min(lats), max(lats)
             min_lon, max_lon = min(lons), max(lons)
             m.fit_bounds([[min_lon, min_lat], [max_lon, max_lat]])
+            
+        status_message.set(f"成功：已找到 {len(features)} 個城市點位！ (代碼: {selected_country.value})")
 
-    # 監聽 df 內容的變化
     solara.use_effect(update_layer, [df]) 
     return m.to_solara()
 
 
 # -----------------------------------------------------------
-# 4. 頁面佈局組件
+## 📑 Solara Page() 
 # -----------------------------------------------------------
 @solara.component
 def Page():
@@ -203,10 +205,10 @@ def Page():
         solara.Markdown(f"**狀態：** {status_message.value}"),
 
         solara.Markdown("---"),
-        
-        # 2. 地圖
+         # 2. 表格
+        city_table,
+        # 3. 地圖
         CityMap(data_df.value),
         
-        # 3. 表格
-        city_table,
+       
     ])
