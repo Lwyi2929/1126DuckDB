@@ -1,176 +1,84 @@
 import solara
-import duckdb
-import leafmap.maplibregl as leafmap
 import pandas as pd
+import leafmap.foliumap as leafmap
 
-# -----------------------------------------------------------
-# 設定
-# -----------------------------------------------------------
-CITIES_CSV_URL = "https://data.gishub.org/duckdb/cities.csv"
+# ----------------------------------------------------
+# 1. 讀取城市資料（全世界城市）
+# ----------------------------------------------------
+CITIES_CSV_URL = "https://raw.githubusercontent.com/solara-dev/examples/main/public/cities.csv"
 
-all_countries = solara.reactive([])
-selected_country = solara.reactive("TWN")
-data_df = solara.reactive(pd.DataFrame())
-status_message = solara.reactive("初始化中...")
+# 載入全部資料
+all_data = pd.read_csv(CITIES_CSV_URL)
+all_countries = sorted(all_data["country"].unique())
 
-
-# -----------------------------------------------------------
-# 載入國家列表
-# -----------------------------------------------------------
-def load_country_list():
-    try:
-        con = duckdb.connect()
-        con.install_extension("httpfs")
-        con.load_extension("httpfs")
-
-        rows = con.sql(f"""
-            SELECT DISTINCT country 
-            FROM '{CITIES_CSV_URL}'
-            ORDER BY country;
-        """).fetchall()
-
-        all_countries.set([r[0] for r in rows])
-        con.close()
-
-        status_message.set("國家列表載入完成")
-    except Exception as e:
-        status_message.set(f"錯誤：無法載入國家列表 {e}")
+# ----------------------------------------------------
+# 2. 反應式 state
+# ----------------------------------------------------
+selected_country = solara.reactive("Taiwan")
+filtered_df = solara.reactive(pd.DataFrame())
 
 
-# -----------------------------------------------------------
-# 依國家載入城市資料
-# -----------------------------------------------------------
-def load_filtered_data():
-    code = selected_country.value
-
-    try:
-        con = duckdb.connect()
-        con.install_extension("httpfs")
-        con.load_extension("httpfs")
-
-        df = con.sql(f"""
-            SELECT name, country, population, latitude, longitude
-            FROM '{CITIES_CSV_URL}'
-            WHERE country = '{code}'
-            ORDER BY population DESC
-            LIMIT 200;
-        """).df()
-
-        con.close()
-
-        df["latitude"] = df["latitude"].astype(float)
-        df["longitude"] = df["longitude"].astype(float)
-
-        data_df.set(df)
-        status_message.set(f"{code} 有 {len(df)} 筆城市資料")
-
-    except Exception as e:
-        status_message.set(f"錯誤：載入城市資料失敗 {e}")
-        data_df.set(pd.DataFrame())
+# ----------------------------------------------------
+# 3. 載入指定國家的城市資料
+# ----------------------------------------------------
+def load_filtered_data(country):
+    df = all_data[all_data["country"] == country]
+    filtered_df.set(df)
+    return df
 
 
-# -----------------------------------------------------------
-# 地圖元件
-# -----------------------------------------------------------
+# ----------------------------------------------------
+# 4. 地圖元件
+# ----------------------------------------------------
 @solara.component
 def CityMap(df: pd.DataFrame):
+    m = leafmap.Map(center=[20, 0], zoom=2)
 
-    m = solara.use_memo(
-        lambda: leafmap.Map(
-            zoom=2,
-            center=[20, 0],
-            add_sidebar=True,
-            sidebar_visible=True,
-            height="900px"    # ⭐ height Allowed
-        ),
-        []
-    )
+    if len(df) > 0:
+        m.add_points_from_xy(
+            df,
+            x="lng",
+            y="lat",
+            popup=["city", "lat", "lng"],
+            layer_name="Cities",
+        )
 
-    # ⭐ 改用 layout_style 設定寬度
-    m.layout_style = {"width": "100%"}
+        # 自動縮放顯示所有城市
+        min_lat, max_lat = df["lat"].min(), df["lat"].max()
+        min_lon, max_lon = df["lng"].min(), df["lng"].max()
+        m.zoom_to_bounds([[min_lat, min_lon], [max_lat, max_lon]])
 
-    def update_layer():
-        LAYER = "city_points"
-        SOURCE = "city_source"
-
-        # 移除舊圖層
-        try:
-            m.remove_layer(LAYER)
-            m.remove_source(SOURCE)
-        except:
-            pass
-
-        if df.empty:
-            return
-
-        features = []
-        lats, lons = [], []
-
-        for _, row in df.iterrows():
-            lat = row["latitude"]
-            lon = row["longitude"]
-            lats.append(lat)
-            lons.append(lon)
-
-            features.append({
-                "type": "Feature",
-                "geometry": {"type": "Point", "coordinates": [lon, lat]},
-                "properties": {
-                    "name": row["name"],
-                    "population": row["population"],
-                },
-            })
-
-        geojson = {"type": "FeatureCollection", "features": features}
-
-        m.add_source(SOURCE, geojson)
-        m.add_layer({
-            "id": LAYER,
-            "type": "circle",
-            "source": SOURCE,
-            "paint": {
-                "circle-radius": 6,
-                "circle-color": "red",
-                "circle-opacity": 0.9,
-            },
-        })
-
-        # ⭐ 自動 zoom to bounds
-        if len(lats) > 0:
-            min_lat, max_lat = min(lats), max(lats)
-            min_lon, max_lon = min(lons), max(lons)
-            m.set_bounds([[min_lon, min_lat], [max_lon, max_lat]])
-
-    solara.use_effect(update_layer, [df])
-    return m.to_solara()
+    return m
 
 
-# -----------------------------------------------------------
-# ⭐⭐⭐ Solara Page() 必須存在
-# -----------------------------------------------------------
+# ----------------------------------------------------
+# 5. 主頁面 UI
+# ----------------------------------------------------
 @solara.component
 def Page():
+    # 載入初始資料
+    df = load_filtered_data(selected_country.value)
 
-    # 初始化
-    solara.use_effect(load_country_list, [])
-    solara.use_effect(load_filtered_data, [selected_country.value])
+    with solara.Column(gap="20px"):
+        solara.Markdown("## 🌍 國家城市地圖（City Map Viewer）")
 
-    return solara.Column([
-
-        # 國家下拉選單
+        # Country Selector
         solara.Select(
-            label="國家代碼",
-            value=selected_country,
-            values=all_countries.value
-        ),
+            label="選擇國家",
+            value=selected_country.value,
+            values=all_countries,
+            on_value=lambda v: selected_country.set(v),
+        )
 
-        solara.Markdown(f"**狀態：** {status_message.value}"),
+        # 當選單變動 → 更新資料
+        df = load_filtered_data(selected_country.value)
 
-        solara.Markdown("### 該國家所有城市經緯度表格"),
-        solara.DataFrame(data_df.value),
+        # Map
+        CityMap(df)
 
-        solara.Markdown("---"),
+        solara.Markdown("### 📄 城市經緯度表格")
+        solara.DataFrame(df[["city", "lat", "lng"]])
 
-        # 地圖
-        CityMap(data_df.value),
-    ])
+
+# Solara app 入口
+Page()
