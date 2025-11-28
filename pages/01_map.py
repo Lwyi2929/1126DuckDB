@@ -97,7 +97,7 @@ def CityMap(df: pd.DataFrame):
         LAYER_ID = "selected_cities_points"
         SOURCE_ID = "cities_data_source"
 
-        # 1. 清除舊圖層和來源
+        # 1. 刪除多餘圖層：清除舊圖層和來源
         try:
              m.remove_layer(LAYER_ID)
              m.remove_source(SOURCE_ID)
@@ -111,9 +111,10 @@ def CityMap(df: pd.DataFrame):
         # 2. 數據轉換為 GeoJSON 字典 (已加入顯式類型轉換，解決渲染問題)
         features = []
         center_coords = None
+        valid_feature_count = 0
         for index, row in df.iterrows():
             try:
-                # 關鍵修正：確保經緯度是標準 Python float 類型
+                # 確保經緯度是標準 Python float 類型
                 lon, lat = float(row["longitude"]), float(row["latitude"])
                 population = int(row["population"]) if pd.notna(row.get("population")) else None
             except Exception:
@@ -131,13 +132,13 @@ def CityMap(df: pd.DataFrame):
                     "population": population
                 }
             })
-        geojson = {"type": "FeatureCollection", "features": features}
+            valid_feature_count += 1
 
         if not features:
             status_message.set(f"警告：所有城市數據轉換失敗，未繪製點位 (代碼: {selected_country.value})。")
             return
         
-        # 3. 添加新的數據源和圖層
+        # 3. 依其表格在地圖上顯示點位：添加新的數據源和圖層
         m.add_source(SOURCE_ID, geojson) 
         m.add_layer(
             {
@@ -156,7 +157,8 @@ def CityMap(df: pd.DataFrame):
         if center_coords:
             m.set_center(center_coords[0], center_coords[1], zoom=5)
             
-        status_message.set(f"成功：已找到 {len(features)} 個城市點位！ (代碼: {selected_country.value})")
+        # 5. 更新狀態訊息
+        status_message.set(f"成功：已找到 {valid_feature_count} 個城市點位！ (代碼: {selected_country.value})")
 
     solara.use_effect(update_map_layer, [df.values.tolist()]) 
     
@@ -169,13 +171,13 @@ def CityMap(df: pd.DataFrame):
 
 @solara.component
 def Page():
-    # A. 應用程式啟動時，載入國家清單 (只執行一次)
+    # A. 應用程式啟動時，載入國家清單
     solara.use_effect(load_country_list, []) 
     
     # B. 當 selected_country 改變時，載入篩選後的數據
     solara.use_effect(load_filtered_data, [selected_country.value])
     
-    # 1. UI 控制項
+    # 1. UI 控制項 (Select, Selected Code, Status Message)
     controls = solara.Column(
         children=[
             solara.Select(label="Country (Alpha3_code)", value=selected_country, values=all_countries.value),
@@ -186,14 +188,29 @@ def Page():
             ), 
         ]
     )
-    
-    # 2. 渲染地圖組件
+
+    # 2. 城市數據表格 (新增：需求 1)
+    city_table = None
+    if not data_df.value.empty:
+        # 選擇需要的欄位並重新命名
+        df_for_table = data_df.value[['name', 'country', 'latitude', 'longitude']].rename(
+            columns={'name': '城市名稱(代碼)', 'country': '代碼', 'latitude': '緯度', 'longitude': '經度'}
+        )
+        city_table = solara.Column(
+            children=[
+                solara.Markdown("### 城市清單與座標詳情"),
+                solara.DataTable(df_for_table)
+            ]
+        )
+        
+    # 3. 渲染地圖組件
     map_display = CityMap(df=data_df.value)
 
-    # 3. 組合：垂直堆疊控制項和地圖
+    # 4. 組合：控制項 -> 表格 -> 地圖 (垂直堆疊)
     return solara.Column(
         children=[
             controls,
+            city_table,  # 顯示表格 (如果存在數據)
             map_display
         ]
     )
