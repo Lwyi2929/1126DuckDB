@@ -175,21 +175,3 @@ def Page():
         
         solara.Markdown(f"### 📋 數據表格 (前 {len(df)} 大城市)")
         solara.DataFrame(df)
-        
-        solara.Markdown(f"### 📊 {country_code} 人口分佈 (Plotly)")
-        fig = px.bar(
-            df, 
-            x="name",               
-            y="population",         
-            color="population",     
-            title=f"{country_code} 城市人口",
-            labels={"name": "城市名稱", "population": "人口數"},
-            height=400 
-        )
-        fig.update_layout(xaxis_tickangle=-45)
-        solara.FigurePlotly(fig)
-
-    elif selected_country.value:
-         solara.Info(f"正在載入 {selected_country.value} 的數據...")
-    else:
-        solara.Info("正在載入國家清單...")
