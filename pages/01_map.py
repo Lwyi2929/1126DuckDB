@@ -3,145 +3,186 @@ import duckdb
 import leafmap.maplibregl as leafmap
 import pandas as pd
 
-# --- 1. 全域初始化 (資料準備，只執行一次) ---
+# ----------------------------------------------------
+# 0. 常量
+# ----------------------------------------------------
+CITIES_CSV_URL = 'https://data.gishub.org/duckdb/cities.csv'
 
-con = duckdb.connect(database=':memory:', read_only=False)
-con.install_extension("httpfs")
-con.install_extension("spatial")
-con.load_extension("httpfs")
-con.load_extension("spatial")
+# ----------------------------------------------------
+# 1. 狀態管理 (Reactive Variables)
+# ----------------------------------------------------
+all_countries = solara.reactive([])
+selected_country = solara.reactive("TWN")  # 預設為 'TWN'
+data_df = solara.reactive(pd.DataFrame()) 
+status_message = solara.reactive("初始化中...")
 
-city_url = "https://data.gishub.org/duckdb/cities.csv" 
+# ----------------------------------------------------
+# 2. 數據獲取邏輯
+# ----------------------------------------------------
 
-# 創建城市資料表 (city_geom)
-con.sql(f"""
-    CREATE OR REPLACE TABLE city_geom AS
-    SELECT
-        *,
-        ST_Point(longitude, latitude) AS geom
-    FROM read_csv_auto('{city_url}');
-""")
-
-# 獲取不重複的國家代碼列表
-country_query_result = con.sql("SELECT DISTINCT country FROM city_geom ORDER BY country;")
-country_list = [row[0] for row in country_query_result.fetchall()]
-
-# 初始化響應式變數
-initial_country = country_list[0] if country_list else "TWN"
-country = solara.reactive(initial_country)
-status_message = solara.reactive("請選擇一個國家...") 
-
-
-# --- 2. 輔助函式 ---
-
-def create_map_instance():
-    """初始化 Leafmap 地圖實例 (只執行一次)"""
-    m = leafmap.Map(
-        zoom=2,
-        add_sidebar=True,
-        sidebar_visible=True,
-        height="800px",
-    )
-    m.add_basemap("Esri.WorldImagery", visible=False)
-    m.add_draw_control(controls=["polygon", "trash"])
-    return m
-
-def fetch_city_data(selected_code):
-    """從 DuckDB 獲取選定國家的城市數據，返回 DataFrame。"""
-    query = f"""
-        SELECT latitude, longitude, country, name, population
-        FROM city_geom
-        WHERE country = '{selected_code}' 
-    """
+# A. 載入所有國家清單 (應用程式啟動時執行一次)
+def load_country_list():
+    status_message.set("正在載入國家列表...")
     try:
-        df = con.sql(query).df()
-        return df
+        con = duckdb.connect()
+        con.install_extension("httpfs")
+        con.load_extension("httpfs")
+        
+        result = con.sql(f"""
+            SELECT DISTINCT country 
+            FROM '{CITIES_CSV_URL}'
+            ORDER BY country;
+        """).fetchall()
+        
+        all_countries.set([row[0] for row in result])
+        
+        if not all_countries.value:
+             status_message.set("警告：國家列表為空。")
+             
+        con.close()
     except Exception as e:
-        print(f"DuckDB Fetch Error: {e}")
-        return pd.DataFrame()
+        status_message.set(f"錯誤：載入國家列表失敗 ({e})")
 
-# --- 3. Solara 組件 (響應式地圖更新) ---
+# B. 根據選中的國家篩選城市數據
+def load_filtered_data():
+    country_name = selected_country.value
+    if not country_name:
+        data_df.set(pd.DataFrame())
+        return 
+        
+    status_message.set(f"正在查詢 {country_name} 的城市數據...")
+    try:
+        con = duckdb.connect()
+        con.install_extension("httpfs")
+        con.load_extension("httpfs")
+        
+        sql_query = f"""
+        SELECT name, country, population, latitude, longitude
+        FROM '{CITIES_CSV_URL}'
+        WHERE country = '{country_name}'
+        ORDER BY population DESC
+        LIMIT 100;
+        """
+        df_result = con.sql(sql_query).df()
+        data_df.set(df_result)
+                
+        con.close()
+    except Exception as e:
+        status_message.set(f"錯誤：執行查詢失敗 ({e})")
+        data_df.set(pd.DataFrame())
+
+# ----------------------------------------------------
+# 3. 視覺化組件
+# ----------------------------------------------------
 
 @solara.component
-def Page():
-    # 1. 地圖實例: 保持使用 use_memo 確保地圖只創建一次
-    m = solara.use_memo(create_map_instance, dependencies=[])
+def CityMap(df: pd.DataFrame):
     
-    # 2. 獲取數據資源：當 country.value 改變時，自動重新執行 fetch_city_data
-    city_df_resource = solara.use_resource(fetch_city_data, kwargs={"selected_code": country.value})
-    
-    # 3. 響應式效果: 監聽數據資源狀態 (city_df_resource.value) 的變化
+    # 使用 use_memo 確保地圖實例只創建一次
+    m = solara.use_memo(
+        lambda: leafmap.Map(
+            zoom=2, center=[40.7, -74.0],
+            add_sidebar=True,
+            sidebar_visible=True,
+            height="800px",
+        ), dependencies=[]
+    )
+    # 設置底圖和控制項
+    m.add_basemap("Esri.WorldImagery", visible=False)
+    m.add_draw_control(controls=["polygon", "trash"])
+
+    # --- 響應式：當 DF 改變時，更新地圖圖層 ---
     def update_map_layer():
-        # 如果數據正在載入，則跳過更新
-        if city_df_resource.state == solara.ResourceState.LOADING:
-            status_message.value = "正在載入數據..."
-            return
-
-        df = city_df_resource.value # 獲取 DataFrame
-        feature_count = len(df)
+        LAYER_ID = "selected_cities_points"
+        SOURCE_ID = "cities_data_source"
         
-        # --- 清除舊圖層 (Leafmap/MapLibreGL 核心邏輯) ---
-        # 由於 add_geojson 沒有 ID，我們需要手動移除 'geojson' 相關的源和圖層
-        LAYER_ID = "geojson_layer_0" # Leafmap 預設會為 add_geojson 創建一個圖層
-        SOURCE_ID = "geojson_source_0"
-
+        # 1. 清除舊圖層和來源
         try:
              m.remove_layer(LAYER_ID)
              m.remove_source(SOURCE_ID)
         except Exception:
              pass 
+        
+        if df.empty:
+            status_message.set(f"警告：未找到城市點位 (代碼: {selected_country.value})。")
+            return
+            
+        # 2. 數據轉換為 GeoJSON 字典
+        features = []
+        center_coords = None
+        for index, row in df.iterrows():
+            lon, lat = row["longitude"], row["latitude"]
+            if center_coords is None:
+                center_coords = [lon, lat]
+                
+            features.append({
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [lon, lat]}, 
+                "properties": {
+                    "name": row["name"],
+                    "country": row["country"],
+                    "population": row.get("population", None)
+                }
+            })
+        geojson = {"type": "FeatureCollection", "features": features}
+        
+        # 3. 添加新的數據源和圖層
+        m.add_source(SOURCE_ID, geojson) 
+        m.add_layer(
+            {
+                "id": LAYER_ID,
+                "source": SOURCE_ID,  
+                "type": "circle",     
+                "paint": {
+                    "circle-radius": 5,
+                    "circle-color": "red",
+                    "circle-opacity": 0.8
+                }
+            }
+        )
+        
+        # 4. 定位地圖
+        if center_coords:
+            m.set_center(center_coords[0], center_coords[1], zoom=5)
+            
+        status_message.set(f"成功：已找到 {len(df)} 個城市點位！ (代碼: {selected_country.value})")
 
-        if feature_count > 0:
-            
-            # --- 數據轉換 (參考您提供的範例) ---
-            features = []
-            for index, row in df.iterrows():
-                try:
-                    population = int(row["population"])
-                except (ValueError, TypeError):
-                    population = None
-                            
-                features.append({
-                    "type": "Feature",
-                    "geometry": {"type": "Point", "coordinates": [row["longitude"], row["latitude"]]}, # [lon, lat] 順序
-                    "properties": {
-                        "name": row["name"],
-                        "country": row["country"],
-                        "population": population
-                    }
-                })
-            geojson = {"type": "FeatureCollection", "features": features}
-
-            # --- 繪製點位 (參考您提供的範例) ---
-            # 關鍵：只傳遞 geojson 數據，讓 Leafmap 自動處理樣式/ID
-            m.add_geojson(geojson)
-            
-            # 定位到選定國家的第一個城市
-            center_lon, center_lat = features[0]["geometry"]["coordinates"]
-            m.set_center(center_lon, center_lat, zoom=5)
-            
-            status_message.value = f"成功：已找到 {feature_count} 個城市點位！ (代碼: {country.value})"
-        else:
-            status_message.value = f"警告：未找到城市點位 (代碼: {country.value})。"
-            
-    # 監聽數據資源的變化，觸發地圖更新
-    solara.use_effect(update_map_layer, [city_df_resource.state, city_df_resource.value])
+    solara.use_effect(update_map_layer, [df.values.tolist()]) 
     
-    # 4. UI 控制項
+    # 返回地圖組件
+    return m.to_solara()
+
+# ----------------------------------------------------
+# 4. 主頁面組件
+# ----------------------------------------------------
+
+@solara.component
+def Page():
+    # A. 應用程式啟動時，載入國家清單 (只執行一次)
+    solara.use_effect(load_country_list, []) 
+    
+    # B. 當 selected_country 改變時，載入篩選後的數據
+    solara.use_effect(load_filtered_data, [selected_country.value])
+    
+    # 1. UI 控制項
     controls = solara.Column(
         children=[
-            solara.Select(label="Country (Alpha3_code)", value=country, values=country_list),
-            solara.Markdown(f"**Selected Code**: {country.value}"),
-            solara.Markdown(f"**診斷**: {status_message.value}", style={"color": "red" if "警告" in status_message.value else "green"}), 
+            solara.Select(label="Country (Alpha3_code)", value=selected_country, values=all_countries.value),
+            solara.Markdown(f"**Selected Code**: {selected_country.value}"),
+            solara.Markdown(
+                f"**診斷**: {status_message.value}", 
+                style={"color": "red" if "警告" in status_message.value or "錯誤" in status_message.value else "green"}
+            ), 
         ]
     )
+    
+    # 2. 渲染地圖組件
+    map_display = CityMap(df=data_df.value)
 
-    map_component = m.to_solara()
-
-    # 5. 組合：垂直堆疊控制項和地圖
+    # 3. 組合：垂直堆疊控制項和地圖
     return solara.Column(
         children=[
             controls,
-            map_component
+            map_display
         ]
     )
