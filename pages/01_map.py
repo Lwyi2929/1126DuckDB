@@ -98,7 +98,7 @@ def CityMap(df: pd.DataFrame):
     if not hasattr(m, '_initialized_base_layers'):
         m.add_basemap("Esri.WorldImagery", before_id=m.first_symbol_layer_id, visible=False)
         m.add_draw_control(controls=["polygon", "trash"])
-        m.layout.height = "900px" 
+        #m.layout.height = "900px" 
         m._initialized_base_layers = True
 
 
