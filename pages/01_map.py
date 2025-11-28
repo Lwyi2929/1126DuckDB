@@ -8,13 +8,12 @@ CITIES_CSV_URL = 'https://data.gishub.org/duckdb/cities.csv'
 all_countries = solara.reactive([])
 selected_country = solara.reactive("TWN")
 data_df = solara.reactive(pd.DataFrame())
-country_center = solara.reactive((None, None))  # 新增：國家中心 (lat, lon)
 status_message = solara.reactive("初始化中...")
 
 
-# ----------------------------------------------------
-# 載入國家列表
-# ----------------------------------------------------
+# ----------------------------------------------------------------------
+# 讀取全部國家列表
+# ----------------------------------------------------------------------
 def load_country_list():
     try:
         con = duckdb.connect()
@@ -34,9 +33,9 @@ def load_country_list():
         status_message.set(f"錯誤：無法載入國家列表 {e}")
 
 
-# ----------------------------------------------------
-# 載入所選國家的城市資料
-# ----------------------------------------------------
+# ----------------------------------------------------------------------
+# 依國家載入城市資料
+# ----------------------------------------------------------------------
 def load_filtered_data():
     code = selected_country.value
 
@@ -49,32 +48,27 @@ def load_filtered_data():
             SELECT name, country, population, latitude, longitude
             FROM '{CITIES_CSV_URL}'
             WHERE country = '{code}'
-            ORDER BY population DESC
-            LIMIT 200;
+            ORDER BY population DESC;
         """).df()
 
         con.close()
 
-        data_df.set(df)
+        # ⭐ 轉 float（避免點位出錯）
+        df["latitude"] = df["latitude"].astype(float)
+        df["longitude"] = df["longitude"].astype(float)
 
-        # ⭐ 新增：計算國家中心（使用平均座標）
-        if len(df) > 0:
-            avg_lat = df["latitude"].astype(float).mean()
-            avg_lon = df["longitude"].astype(float).mean()
-            country_center.set((avg_lat, avg_lon))
-        else:
-            country_center.set((None, None))
+        data_df.set(df)
 
         status_message.set(f"{code} 共有 {len(df)} 筆城市資料")
 
     except Exception as e:
-        status_message.set(f"錯誤：查詢資料失敗 {e}")
+        status_message.set(f"錯誤：載入城市資料失敗 {e}")
         data_df.set(pd.DataFrame())
 
 
-# ----------------------------------------------------
-# 地圖組件
-# ----------------------------------------------------
+# ----------------------------------------------------------------------
+# 地圖元件
+# ----------------------------------------------------------------------
 @solara.component
 def CityMap(df: pd.DataFrame):
 
@@ -84,17 +78,18 @@ def CityMap(df: pd.DataFrame):
             center=[20, 0],
             add_sidebar=True,
             sidebar_visible=True,
-            height="800px",
+            height="900px",
+            width="100%",
         ),
         []
     )
 
-    # ⭐ df 改 → 更新地圖點位
+    # df 改 → 更新圖層
     def update_layer():
         LAYER = "city_points"
         SOURCE = "city_source"
 
-        # 清除舊 layer
+        # 移除舊圖層
         try:
             m.remove_layer(LAYER)
             m.remove_source(SOURCE)
@@ -106,25 +101,27 @@ def CityMap(df: pd.DataFrame):
 
         # 建立 GeoJSON
         features = []
+        lats, lons = [], []
+
         for _, row in df.iterrows():
-            try:
-                lon = float(row["longitude"])
-                lat = float(row["latitude"])
-            except:
-                continue
+            lat = row["latitude"]
+            lon = row["longitude"]
+
+            lats.append(lat)
+            lons.append(lon)
 
             features.append({
                 "type": "Feature",
                 "geometry": {"type": "Point", "coordinates": [lon, lat]},
                 "properties": {
                     "name": row["name"],
-                    "population": row["population"]
+                    "population": row["population"],
                 }
             })
 
         geojson = {"type": "FeatureCollection", "features": features}
 
-        # 加入來源與圖層
+        # 加資料源與圖層
         m.add_source(SOURCE, geojson)
         m.add_layer({
             "id": LAYER,
@@ -133,29 +130,29 @@ def CityMap(df: pd.DataFrame):
             "paint": {
                 "circle-radius": 6,
                 "circle-color": "red",
-                "circle-opacity": 0.85,
+                "circle-opacity": 0.9,
             },
         })
 
-        # 定位到第一筆城市
-        lon, lat = features[0]["geometry"]["coordinates"]
-        m.set_center(lon, lat, zoom=5)
+        # ⭐自動縮放到所有城市點（bounds）
+        if len(lats) > 0:
+            min_lat, max_lat = min(lats), max(lats)
+            min_lon, max_lon = min(lons), max(lons)
+            m.set_bounds([[min_lon, min_lat], [max_lon, max_lat]])
 
     solara.use_effect(update_layer, [df])
 
     return m.to_solara()
 
 
-# ----------------------------------------------------
+# ----------------------------------------------------------------------
 # 主頁面
-# ----------------------------------------------------
+# ----------------------------------------------------------------------
 @solara.component
 def Page():
 
     solara.use_effect(load_country_list, [])
     solara.use_effect(load_filtered_data, [selected_country.value])
-
-    lat, lon = country_center.value
 
     return solara.Column([
         solara.Select(
@@ -164,17 +161,15 @@ def Page():
             values=all_countries.value
         ),
 
-        # ⭐ 新增：顯示國家中心經緯度
-        solara.Markdown(
-            f"""**國家中心座標**：  
-            緯度：`{lat}`  
-            經度：`{lon}`"""
-            if lat is not None else
-            "**尚無資料可計算國家中心**"
-        ),
+        solara.Markdown(f"**狀態：** {status_message.value}"),
 
-        solara.Markdown(f"**狀態**：{status_message.value}"),
+        # ⭐ 顯示城市經緯度列表（你要求的功能）
+        solara.Markdown("### 該國家城市經緯度表格"),
+        solara.DataFrame(data_df.value),
 
+        solara.Markdown("---"),
+
+        # 地圖
         CityMap(data_df.value),
     ])
 
