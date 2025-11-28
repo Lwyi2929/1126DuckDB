@@ -206,5 +206,4 @@ def Page():
         # 3. 地圖
         CityMap(data_df.value),
         
-       
     ])
