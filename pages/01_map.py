@@ -166,9 +166,9 @@ def Page():
 
         # ⭐ 新增：顯示國家中心經緯度
         solara.Markdown(
-            f"**國家中心座標**：  
+            f"""**國家中心座標**：  
             緯度：`{lat}`  
-            經度：`{lon}`"
+            經度：`{lon}`"""
             if lat is not None else
             "**尚無資料可計算國家中心**"
         ),
