@@ -117,7 +117,10 @@ def CityMap(df: pd.DataFrame):
         
         if df.empty: return
 
-        features = []; lats, lons = []
+        features = []
+        lats = [] 
+        lons = []
+        
         for index, row in df.iterrows():
             try: lon, lat = float(row["longitude"]), float(row["latitude"])
             except Exception: continue
