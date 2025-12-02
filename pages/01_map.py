@@ -171,13 +171,13 @@ def Page():
         # 標題
         solara.Markdown(f"## {selected_country.value}（人口 ≥ {population_threshold.value:,}）")
         
-        # 地圖元件
-        CityMap(df) 
+        
         
         # 表格
         solara.Markdown("###表格")
         solara.DataFrame(df)
-        
+        # 地圖元件
+        CityMap(df) 
     elif selected_country.value: 
         # 處理沒有數據但國家已選的情況
         solara.Info(f"{selected_country.value} 沒有城市符合當前人口門檻：{population_threshold.value:,}")
