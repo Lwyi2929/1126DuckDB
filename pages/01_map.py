@@ -222,16 +222,15 @@ def CityMap(df: pd.DataFrame):
 
 
 # -----------------------------------------------------------
-# 4. 主頁面組件
+# -----------------------------------------------------------
+# 4. 主頁面組件 (已修正 IntRangeSlider 錯誤)
 # -----------------------------------------------------------
 @solara.component
 def Page():
 
-    # 執行數據載入邏輯
+    # 執行數據載入邏輯 (不變)
     solara.use_effect(load_country_list, [])
-    # ⭐ 新增：監聽國家變化，載入新的邊界
     solara.use_effect(load_country_pop_bounds, [selected_country.value]) 
-    # ⭐ 監聽國家和範圍變化，載入過濾數據
     solara.use_effect(load_filtered_data, [selected_country.value, population_range.value])
 
     if not all_countries.value and status_message.value != "國家列表載入完成":
@@ -266,8 +265,8 @@ def Page():
             values=all_countries.value
         ),
         
-        # ⭐ 動態人口範圍 Slider
-        solara.IntRangeSlider(
+        # ⭐ 修正點：將 solara.IntRangeSlider 替換為 solara.RangeSlider
+        solara.RangeSlider(
             label=f"人口範圍 (人): {population_range.value[0]:,} - {population_range.value[1]:,}",
             value=population_range,
             min=min_available_pop,   # 綁定動態最小值
