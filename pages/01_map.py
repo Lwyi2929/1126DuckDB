@@ -8,7 +8,6 @@ import numpy as np
 # 0. 常量與預設值
 # ----------------------------------------------------
 CITIES_CSV_URL = 'https://data.gishub.org/duckdb/cities.csv'
-# 預設值，將在載入數據後立即被覆蓋為實際的全域最小值和最大值
 MIN_POP_DEFAULT = 100000
 MAX_POP_DEFAULT = 5000000
 MAX_POP_SLIDER = 15000000 
@@ -16,13 +15,10 @@ MAX_POP_SLIDER = 15000000
 # ----------------------------------------------------
 # 1. 狀態管理 (Reactive Variables)
 # ----------------------------------------------------
-# all_countries 和 selected_country 已移除
-data_df = solara.reactive(pd.DataFrame())
+data_df = solara.reactive(pd.DataFrame()) 
 status_message = solara.reactive("初始化中...")
-# 滑塊的當前選定值
 min_pop_value = solara.reactive(MIN_POP_DEFAULT) 
 max_pop_value = solara.reactive(MAX_POP_DEFAULT) 
-# 滑塊的最大和最小值範圍 (現在是全域範圍)
 country_pop_bounds = solara.reactive((0, MAX_POP_SLIDER)) 
 
 
@@ -30,39 +26,36 @@ country_pop_bounds = solara.reactive((0, MAX_POP_SLIDER))
 # 2. 數據獲取邏輯
 # ----------------------------------------------------
 
-# ⭐ 替換 load_country_list：載入全域人口邊界
+# A. 載入全域人口邊界 (MIN/MAX)
 def load_global_pop_bounds():
-    """載入所有城市的最小和最大人口數，並設定滑塊範圍。"""
     status_message.set("正在載入全域人口邊界...")
     try:
         con = duckdb.connect()
         con.install_extension("httpfs"); con.load_extension("httpfs")
-        # 查詢全域 MIN/MAX
         result = con.sql(f"SELECT MIN(population), MAX(population) FROM '{CITIES_CSV_URL}';").fetchone()
         con.close()
 
         min_pop_actual = int(result[0]) if result[0] is not None else 0
         max_pop_actual = int(result[1]) if result[1] is not None else MAX_POP_SLIDER
         
-        # 將最大值向上取整到最近的 10萬，以提供更好的滑塊體驗
         max_pop_rounded = int(np.ceil(max_pop_actual / 100000.0)) * 100000
         if max_pop_rounded < 100000: max_pop_rounded = 100000
         
-        # 設定滑塊的可用範圍
         country_pop_bounds.set((min_pop_actual, max_pop_rounded))
-        status_message.set(f"全域人口範圍載入完成: {min_pop_actual:,} - {max_pop_rounded:,}")
-
+        
         # 將滑塊的初始值設定為全域範圍
         min_pop_value.set(min_pop_actual)
         max_pop_value.set(max_pop_rounded)
-        
+        status_message.set(f"全域人口範圍載入完成: {min_pop_actual:,} - {max_pop_rounded:,}")
+
     except Exception as e:
         status_message.set(f"錯誤：載入全域人口邊界失敗 ({e})")
-        country_pop_bounds.set((0, MAX_POP_SLIDER))
+        # 發生錯誤時，將邊界設為極限，並清空數據
+        country_pop_bounds.set((0, MAX_POP_SLIDER)) 
+        data_df.set(pd.DataFrame())
 
-# ⭐ 修正 load_filtered_data：移除國家篩選，僅根據人口篩選
+# B. 根據選中的人口範圍篩選城市數據
 def load_filtered_data():
-    """根據選中的人口範圍篩選全球城市數據。"""
     min_pop = min_pop_value.value
     max_pop = max_pop_value.value
     
@@ -96,11 +89,11 @@ def load_filtered_data():
         data_df.set(pd.DataFrame())
 
 # -----------------------------------------------------------
-# 3. 視覺化組件 (CityMap) - 保持不變
+# 3. 視覺化組件 (CityMap) - 保持穩定
 # -----------------------------------------------------------
 @solara.component
 def CityMap(df: pd.DataFrame):
-
+    
     m = solara.use_memo(
         lambda: leafmap.Map(zoom=2, center=[0, 0], add_sidebar=True, sidebar_visible=True,),
         []
@@ -114,7 +107,6 @@ def CityMap(df: pd.DataFrame):
 
     def update_layer():
         LAYER = "city_points"; SOURCE = "city_source"
-
         try: m.remove_layer(LAYER); m.remove_source(SOURCE)
         except Exception: pass
         
@@ -147,55 +139,51 @@ def CityMap(df: pd.DataFrame):
             
         status_message.set(f"成功：已找到 {len(features)} 個城市點位！")
 
-    solara.use_effect(update_layer, [df.values.tolist()]) 
+    solara.use_effect(update_layer, [df]) 
     return m.to_solara()
 
-
 # -----------------------------------------------------------
-# 4. 主頁面組件 (Page)
-# -----------------------------------------------------------
-# 4. 主頁面組件 (Page)
+# 4. 主頁面組件
 # -----------------------------------------------------------
 @solara.component
 def Page():
 
+    # 執行數據載入邏輯
     solara.use_effect(load_global_pop_bounds, []) 
     solara.use_effect(load_filtered_data, [min_pop_value.value, max_pop_value.value])
 
-    # 1. 獲取動態邊界 (修正點：必須在這裡定義 min_available_pop)
+    # 獲取動態邊界
     min_available_pop, max_available_pop = country_pop_bounds.value
-
-    # 檢查是否在載入中 (使用修正後的變數)
-    if min_available_pop == 0 and max_available_pop == MAX_POP_SLIDER and status_message.value.startswith("正在載入"):
+    
+    # ⭐ 修正點：在渲染任何複雜組件前，檢查邊界是否已初始化 (防止 NoneType 錯誤)
+    if max_available_pop == MAX_POP_SLIDER and status_message.value.startswith("正在載入"):
          return solara.Info("正在載入全域人口邊界...")
 
-    # 城市表格 (不變)
-    city_table = None
-    df = data_df.value
+    # 城市表格
+    city_table = None; df = data_df.value
     if not df.empty:
         df_for_table = df[['name', 'country', 'latitude', 'longitude', 'population']].rename(
             columns={'name': '城市名稱', 'country': '代碼', 'latitude': '緯度', 'longitude': '經度', 'population': '人口'}
         )
         city_table = solara.Column([solara.Markdown("### 城市清單與座標詳情"), solara.DataTable(df_for_table)])
     
-    # 組合頁面佈局
     return solara.Column([
 
         solara.Card(title="城市數據篩選與狀態", elevation=2),
 
-        # 2. 控制項 (現在 min/max_available_pop 已被定義)
+        # 1. 控制項和狀態
         solara.SliderInt(
             label=f"最低人口 (人): {min_pop_value.value:,}",
             value=min_pop_value,
-            min=min_available_pop, # OK
-            max=max_available_pop, # OK
+            min=min_available_pop,
+            max=max_available_pop,
             step=50000
         ),
         solara.SliderInt(
             label=f"最高人口 (人): {max_pop_value.value:,}",
             value=max_pop_value,
-            min=min_available_pop, # OK
-            max=max_available_pop, # OK
+            min=min_available_pop,
+            max=max_available_pop,
             step=50000
         ),
         
