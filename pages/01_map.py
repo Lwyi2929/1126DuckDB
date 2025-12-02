@@ -154,52 +154,40 @@ def CityMap(df: pd.DataFrame):
 # -----------------------------------------------------------
 # 4. 主頁面組件 (Page)
 # -----------------------------------------------------------
+# 4. 主頁面組件 (Page)
+# -----------------------------------------------------------
 @solara.component
 def Page():
 
-    # ⭐ 修正：呼叫 load_global_pop_bounds 一次載入全域範圍
-    solara.use_effect(load_global_pop_bounds, []) 
-    # ⭐ 修正：只監聽兩個滑塊值的變化來過濾數據
-    solara.use_effect(load_filtered_data, [min_pop_value.value, max_pop_value.value])
+    # ... (載入邏輯和狀態初始化不變) ...
 
-    min_available_pop, max_available_pop = country_pop_bounds.value
-    
-    # 檢查是否仍在載入初始邊界
-    if max_available_pop == MAX_POP_SLIDER and status_message.value.startswith("正在載入"):
-         return solara.Info("正在載入全域人口邊界...")
-
-    # 城市表格
-    city_table = None; df = data_df.value
+    # 城市表格 (不變)
+    city_table = None
+    df = data_df.value
     if not df.empty:
-        df_for_table = df[['name', 'country', 'latitude', 'longitude', 'population']].rename(
-            columns={'name': '城市名稱', 'country': '代碼', 'latitude': '緯度', 'longitude': '經度', 'population': '人口'}
-        )
+        # ... (表格創建邏輯) ...
         city_table = solara.Column([solara.Markdown("### 城市清單與座標詳情"), solara.DataTable(df_for_table)])
     
-    return solara.Column([
-
-        solara.Card(title="城市數據篩選與狀態 (全域模式)", elevation=2),
-
-        # ⭐ solara.Select 已移除
+    # 組合頁面佈局
+    # ⭐ 修正點：使用列表推導式，過濾掉所有 None 值
+    
+    main_content = [
+        solara.Card(title="城市數據篩選與狀態", elevation=2),
         
-        solara.SliderInt(
-            label=f"最低人口 (人): {min_pop_value.value:,}",
-            value=min_pop_value,
-            min=min_available_pop,
-            max=max_available_pop,
-            step=50000
-        ),
-        solara.SliderInt(
-            label=f"最高人口 (人): {max_pop_value.value:,}",
-            value=max_pop_value,
-            min=min_available_pop,
-            max=max_available_pop,
-            step=50000
-        ),
+        # 1. 控制項
+        solara.Select(label="選擇國家代碼", value=selected_country, values=all_countries.value),
+        solara.SliderInt(label=f"最低人口 (人): {min_pop_value.value:,}", value=min_pop_value, min=min_available_pop, max=max_available_pop, step=50000),
+        solara.SliderInt(label=f"最高人口 (人): {max_pop_value.value:,}", value=max_pop_value, min=min_available_pop, max=max_available_pop, step=50000),
         
         solara.Markdown(f"**狀態：** {status_message.value}"),
         solara.Markdown("---"),
         
+        # 2. 地圖
         CityMap(data_df.value),
-        city_table,
-    ])
+        
+        # 3. 表格 (只有在有數據時才會是個元件，否則為 None)
+        city_table, 
+    ]
+    
+    # 透過列表推導式確保 children 列表中不包含任何 None
+    return solara.Column([item for item in main_content if item is not None])
