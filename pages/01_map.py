@@ -175,7 +175,7 @@ def Page():
         solara.Card(title="城市數據篩選與狀態", elevation=2),
         
         # 1. 控制項
-        solara.Select(label="選擇國家代碼", value=selected_country, values=all_countries.value),
+        #solara.Select(label="選擇國家代碼", value=selected_country, values=all_countries.value),
         solara.SliderInt(label=f"最低人口 (人): {min_pop_value.value:,}", value=min_pop_value, min=min_available_pop, max=max_available_pop, step=50000),
         solara.SliderInt(label=f"最高人口 (人): {max_pop_value.value:,}", value=max_pop_value, min=min_available_pop, max=max_available_pop, step=50000),
         
