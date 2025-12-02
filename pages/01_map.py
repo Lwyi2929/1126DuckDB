@@ -20,9 +20,8 @@ selected_country = solara.reactive("TWN")
 data_df = solara.reactive(pd.DataFrame())
 status_message = solara.reactive("初始化中...")
 
-# ⭐ 修正：使用兩個單獨的響應式變數替換 population_range
-min_pop_value = solara.reactive(MIN_POP_DEFAULT) 
-max_pop_value = solara.reactive(MAX_POP_DEFAULT) 
+# ⭐ 修正：恢復為單一 tuple 響應式變數 (用於 SliderInt 的 value)
+population_range = solara.reactive((MIN_POP_DEFAULT, MAX_POP_DEFAULT)) 
 country_pop_bounds = solara.reactive((0, MAX_POP_SLIDER)) 
 
 
@@ -34,8 +33,7 @@ def load_country_list():
     status_message.set("正在載入國家列表...")
     try:
         con = duckdb.connect()
-        con.install_extension("httpfs")
-        con.load_extension("httpfs")
+        con.install_extension("httpfs"); con.load_extension("httpfs")
         result = con.sql(f"SELECT DISTINCT country FROM '{CITIES_CSV_URL}' ORDER BY country;").fetchall()
         all_countries.set([r[0] for r in result])
         if not all_countries.value: status_message.set("警告：國家列表為空。")
@@ -43,7 +41,7 @@ def load_country_list():
     except Exception as e:
         status_message.set(f"錯誤：載入國家列表失敗 ({e})")
 
-# ⭐ B. 新增：載入選定國家的人口邊界 (MIN/MAX)
+# B. 載入選定國家的人口邊界 (MIN/MAX)
 def load_country_pop_bounds():
     code = selected_country.value
     if not code:
@@ -56,15 +54,24 @@ def load_country_pop_bounds():
 
         min_pop = int(result[0]) if result[0] is not None else 0
         max_pop = int(result[1]) if result[1] is not None else MAX_POP_SLIDER
+        
+        # 將最大值向上取整到最近的 10萬
         max_pop_rounded = int(np.ceil(max_pop / 100000.0)) * 100000
         if max_pop_rounded < 100000: max_pop_rounded = 100000
         
         country_pop_bounds.set((min_pop, max_pop_rounded))
         
-        # 關鍵：重設 population_range 的值 (現在是 min_pop_value 和 max_pop_value)
-        # 確保當前值在新的邊界內
-        if min_pop_value.value < min_pop: min_pop_value.set(min_pop)
-        if max_pop_value.value > max_pop_rounded: max_pop_value.set(max_pop_rounded)
+        # 關鍵：重設 population_range 的值，確保範圍在新邊界內
+        current_min, current_max = population_range.value
+        
+        new_min = max(min_pop, current_min)
+        new_max = min(max_pop_rounded, current_max)
+        
+        # 如果新範圍無效，則重設為新的邊界
+        if new_min > new_max:
+             population_range.set((min_pop, max_pop_rounded))
+        else:
+             population_range.set((new_min, new_max))
         
     except Exception as e:
         print(f"Error loading bounds: {e}")
@@ -73,10 +80,15 @@ def load_country_pop_bounds():
 # C. 根據選中的國家篩選城市數據
 def load_filtered_data():
     code = selected_country.value
-    # ⭐ 獲取單獨的 MIN/MAX 值
-    min_pop = min_pop_value.value
-    max_pop = max_pop_value.value
+    # ⭐ 從單一 tuple 變數中獲取 MIN/MAX 值
+    min_pop, max_pop = population_range.value
     
+    # 檢查範圍是否有效 (最低不能大於最高)
+    if min_pop > max_pop:
+        status_message.set("錯誤：最低人口不能大於最高人口。")
+        data_df.set(pd.DataFrame())
+        return
+
     if not code: data_df.set(pd.DataFrame()); return 
         
     status_message.set(f"正在查詢 {code} (人口 {min_pop:,} - {max_pop:,})...")
@@ -106,11 +118,11 @@ def load_filtered_data():
         data_df.set(pd.DataFrame())
 
 # -----------------------------------------------------------
-# 3. 視覺化組件 (CityMap 邏輯保持不變)
+# 3. 視覺化組件 (保持不變)
 # -----------------------------------------------------------
 @solara.component
 def CityMap(df: pd.DataFrame):
-    # ... (CityMap 函式內容不變，除了不再依賴 population_range) ...
+    
     m = solara.use_memo(
         lambda: leafmap.Map(zoom=2, center=[0, 0], add_sidebar=True, sidebar_visible=True,),
         []
@@ -149,7 +161,7 @@ def CityMap(df: pd.DataFrame):
 
         if len(lats) > 0:
             min_lat, max_lat = min(lats), max(lats); min_lon, max_lon = min(lons), max(lons)
-            m.fit_bounds([[min_lon, min_lat], [max_lon, max_lat]])
+            m.fit_bounds([[min_lon, min_lat], [max_lon, max_lon]])
             
         status_message.set(f"成功：已找到 {len(features)} 個城市點位！ (代碼: {selected_country.value})")
 
@@ -163,10 +175,9 @@ def CityMap(df: pd.DataFrame):
 def Page():
 
     solara.use_effect(load_country_list, [])
-    # ⭐ 監聽國家變化，載入新的邊界
     solara.use_effect(load_country_pop_bounds, [selected_country.value]) 
-    # ⭐ 監聽國家和兩個滑塊的變化
-    solara.use_effect(load_filtered_data, [selected_country.value, min_pop_value.value, max_pop_value.value])
+    # ⭐ 監聽 population_range.value 變化
+    solara.use_effect(load_filtered_data, [selected_country.value, population_range.value])
 
     if not all_countries.value and status_message.value != "國家列表載入完成":
          return solara.Info("正在載入國家清單...")
@@ -186,8 +197,8 @@ def Page():
 
         solara.Select(label="選擇國家代碼", value=selected_country, values=all_countries.value),
         
-        # ⭐ 修正點：替換為 solara.SliderInt
-       solara.SliderInt(
+        # ⭐ 核心修正：使用 solara.SliderInt 並傳遞 tuple value
+        solara.SliderInt(
             # 顯示當前範圍
             label=f"人口篩選範圍 (人): {population_range.value[0]:,} - {population_range.value[1]:,}",
             value=population_range,
