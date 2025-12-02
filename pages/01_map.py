@@ -217,27 +217,16 @@ def Page():
     return solara.Column(
         [
             solara.Card(
-                children=solara.Column([
-                    solara.SliderInt(
-                        label=f"最低人口: {min_pop_value.value:,}",
-                        value=min_pop_value,
-                        min=min_avail,
-                        max=max_avail,
-                        step=50000,
-                    ),
-                    solara.SliderInt(
-                        label=f"最高人口: {max_pop_value.value:,}",
-                        value=max_pop_value,
-                        min=min_avail,
-                        max=max_avail,
-                        step=50000,
-                    ),
-                    solara.Info(status_message.value),
-                    solara.Markdown("---"),
-                ]),
-                title="城市資料篩選控制",
-                elevation=2,
-            ),
+    children=[
+        solara.SliderInt(...),
+        solara.SliderInt(...),
+        solara.Info(status_message.value),
+        solara.Markdown("---"),
+    ],
+    title="城市資料篩選控制",
+    elevation=2,
+)
+,
             CityMap(df),
             table_block,
         ]
