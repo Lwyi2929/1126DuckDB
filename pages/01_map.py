@@ -187,18 +187,12 @@ def Page():
         solara.Select(label="選擇國家代碼", value=selected_country, values=all_countries.value),
         
         # ⭐ 修正點：替換為 solara.SliderInt
-        solara.SliderInt(
-            label=f"最低人口 (人): {min_pop_value.value:,}",
-            value=min_pop_value,
-            min=min_available_pop,
-            max=max_available_pop,
-            step=50000
-        ),
-        solara.SliderInt(
-            label=f"最高人口 (人): {max_pop_value.value:,}",
-            value=max_pop_value,
-            min=min_available_pop,
-            max=max_available_pop,
+       solara.SliderInt(
+            # 顯示當前範圍
+            label=f"人口篩選範圍 (人): {population_range.value[0]:,} - {population_range.value[1]:,}",
+            value=population_range,
+            min=min_available_pop,   
+            max=max_available_pop,   
             step=50000
         ),
         
