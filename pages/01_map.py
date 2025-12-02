@@ -85,7 +85,7 @@ def load_filtered_data():
         data_df.set(pd.DataFrame())
 
 # -----------------------------------------------------------
-# 3. 視覺化組件 (CityMap) - 實現集群
+# 3. 視覺化組件 (CityMap) - 修正集群問題
 # -----------------------------------------------------------
 @solara.component
 def CityMap(df: pd.DataFrame):
@@ -102,25 +102,17 @@ def CityMap(df: pd.DataFrame):
         m._initialized_base_layers = True
 
     def update_layer():
-        # 定義不同的圖層ID
         SOURCE = "city_source"
-        CLUSTER_LAYER = "clusters"
-        CLUSTER_COUNT_LAYER = "cluster-count"
-        UNCLUSTERED_LAYER = "unclustered-point"
+        # ⭐ 修正：只使用單一圖層 ID
+        SINGLE_POINT_LAYER = "single_city_points"
         
-        # 移除舊圖層和數據源
-        for layer in [CLUSTER_LAYER, CLUSTER_COUNT_LAYER, UNCLUSTERED_LAYER]:
-            try: m.remove_layer(layer)
-            except Exception: pass
-        try: m.remove_source(SOURCE)
+        # 移除舊圖層
+        try: m.remove_layer(SINGLE_POINT_LAYER); m.remove_source(SOURCE)
         except Exception: pass
         
         if df.empty: return
 
-        features = []
-        lats = [] 
-        lons = []
-        
+        features = []; lats, lons = []
         for index, row in df.iterrows():
             try: lon, lat = float(row["longitude"]), float(row["latitude"])
             except Exception: continue
@@ -136,64 +128,28 @@ def CityMap(df: pd.DataFrame):
             status_message.set(f"警告：城市數據轉換失敗，未繪製點位。")
             return
             
-        # ⭐ 步驟 1: 添加數據源並啟用集群 (cluster=True)
-        m.add_source(SOURCE, geojson, cluster=True, clusterMaxZoom=14, clusterRadius=50)
+        # ⭐ 核心修正 1: 移除集群參數
+        m.add_source(SOURCE, geojson) 
 
-        # ⭐ 步驟 2: 繪製集群圓圈 (Clusters circles)
+        # ⭐ 核心修正 2: 繪製單一圓點圖層
         m.add_layer({
-            "id": CLUSTER_LAYER,
+            "id": SINGLE_POINT_LAYER,
             "type": "circle",
             "source": SOURCE,
-            "filter": ["has", "point_count"], # 僅顯示具有計數屬性的點 (即集群)
+            # 移除所有 filter
             "paint": {
-                # 根據集群中的點位數量改變顏色
-                "circle-color": [
-                    "step", ["get", "point_count"],
-                    "#51bbd6", 100, "#f1f075", 750, "#f28cb1"
-                ],
-                "circle-radius": [
-                    "step", ["get", "point_count"],
-                    20, 100, 30, 750, 40
-                ]
+                "circle-radius": 6,
+                "circle-color": "red",
+                "circle-opacity": 0.9,
             }
         })
 
-        # ⭐ 步驟 3: 繪製集群計數 (Cluster count)
-        m.add_layer({
-            "id": CLUSTER_COUNT_LAYER,
-            "type": "symbol",
-            "source": SOURCE,
-            "filter": ["has", "point_count"],
-            "layout": {
-                "text-field": ["get", "point_count_abbreviated"],
-                "text-font": ["DIN Offc Pro Medium", "Arial Unicode MS Bold"],
-                "text-size": 12
-            },
-            "paint": {
-                "text-color": "#ffffff"
-            }
-        })
-
-        # ⭐ 步驟 4: 繪製非集群點位 (Unclustered points)
-        m.add_layer({
-            "id": UNCLUSTERED_LAYER,
-            "type": "circle",
-            "source": SOURCE,
-            "filter": ["!", ["has", "point_count"]], # 僅顯示沒有計數屬性的點 (即單獨點位)
-            "paint": {
-                "circle-color": "#11b4da",
-                "circle-radius": 4,
-                "circle-stroke-width": 1,
-                "circle-stroke-color": "#fff"
-            }
-        })
-
-        # 調整地圖視圖
+        # 定位地圖
         if len(lats) > 0:
             min_lat, max_lat = min(lats), max(lats); min_lon, max_lon = min(lons), max(lons)
             m.fit_bounds([[min_lon, min_lat], [max_lon, max_lat]])
             
-        status_message.set(f"成功：已找到 {len(features)} 個城市點位，並啟用集群顯示！")
+        status_message.set(f"成功：已找到 {len(features)} 個城市點位，以單一圓點顯示。")
 
     solara.use_effect(update_layer, [df]) 
     return m.to_solara()
