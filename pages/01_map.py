@@ -43,34 +43,38 @@ def load_country_list():
         print("Error loading countries:", e)
 
 # -----------------------------
-# 3. 載入該國家 + 人口門檻的城市
+# 3. 載入該國家 + 人口門檻的城市 (已修正類型轉換)
 # -----------------------------
 def load_filtered_data():
     country_name = selected_country.value
     threshold = population_threshold.value
 
     if not country_name:
-        return
+        data_df.set(pd.DataFrame()); return # 確保返回空 DF 而不是 None
 
     try:
         con = duckdb.connect()
-        con.install_extension("httpfs")
-        con.load_extension("httpfs")
+        con.install_extension("httpfs"); con.load_extension("httpfs")
 
+        # ⭐ 核心修正：使用 CAST(population AS INTEGER) 確保篩選正確性
         df_result = con.sql(f"""
             SELECT name, country, population, latitude, longitude
             FROM '{CITIES_CSV_URL}'
             WHERE country = '{country_name}'
-              AND population >= {threshold}
+              AND CAST(population AS INTEGER) >= {threshold} 
             ORDER BY population DESC
-            LIMIT 200; # 增加限制，以確保 GeoJSON 數據合理
+            LIMIT 200;
         """).df()
 
+        # 確保數據類型正確 (這部分保持不變)
+        df_result["latitude"] = df_result["latitude"].astype(float)
+        df_result["longitude"] = df_result["longitude"].astype(float)
+        
         data_df.set(df_result)
         con.close()
 
     except Exception as e:
-        print("Error loading filtered cities:", e)
+        print(f"Error loading filtered cities: {e}")
         data_df.set(pd.DataFrame())
 
 # -----------------------------
@@ -134,18 +138,22 @@ def CityMap(df: pd.DataFrame):
     return m.to_solara()
 
 # -----------------------------
-# 5. Solara 主頁面
+# 5. Solara 主頁面 (Page)
 # -----------------------------
 @solara.component
 def Page():
 
+    # 初始化：載入國家清單
     solara.use_effect(load_country_list, dependencies=[])
 
+    # 當國家 或 人口門檻 有改變 → 重新查詢 DuckDB
     solara.use_effect(
         load_filtered_data,
         dependencies=[selected_country.value, population_threshold.value]
     )
-
+    
+    # ... (其餘 UI 邏輯不變) ...
+    
     with solara.Card(title="城市篩選器"):
         solara.Select(
             label="選擇國家",
@@ -153,7 +161,6 @@ def Page():
             values=all_countries.value
         )
 
-        # ⭐ 人口門檻 slider
         solara.SliderInt(
             label="人口下限",
             value=population_threshold,
@@ -165,22 +172,19 @@ def Page():
 
     df = data_df.value
 
-    # 主內容顯示區塊 (只有在有選定國家且有數據時才顯示地圖和表格)
     if selected_country.value and not df.empty:
-        
-        # 標題
+
         solara.Markdown(f"## {selected_country.value}（人口 ≥ {population_threshold.value:,}）")
-        
-        
-        
+
+        # 由於你的 CityMap 元件調用邏輯複雜，我將直接使用你的 Page 元件的最後部分
         # 表格
         solara.Markdown("###表格")
         solara.DataFrame(df)
-        # 地圖元件
+        
+        # 地圖
         CityMap(df) 
+        
     elif selected_country.value: 
-        # 處理沒有數據但國家已選的情況
         solara.Info(f"{selected_country.value} 沒有城市符合當前人口門檻：{population_threshold.value:,}")
     else:
-        # 處理國家清單尚未載入的情況
         solara.Info("正在載入國家清單...")
