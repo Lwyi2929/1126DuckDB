@@ -133,8 +133,12 @@ def CityMap(df: pd.DataFrame):
             return
             
         # ⭐ 核心修正 1: 移除集群參數
-        m.add_source(geojson) 
-        
+        m.add_source(SOURCE, 
+                     { "type": "geojson",
+                      "data": "geojson"
+                    
+            }) 
+
         # ⭐ 核心修正 2: 繪製單一圓點圖層
         m.add_layer({
             "id": SINGLE_POINT_LAYER,
