@@ -2,12 +2,17 @@ import solara
 import duckdb
 import pandas as pd
 import leafmap.maplibregl as leafmap
-import numpy as np
+import numpy as np # 引入 numpy 處理數值計算
 
 # ----------------------------------------------------
-# 0. 常量
+# 0. 常量與預設值
 # ----------------------------------------------------
 CITIES_CSV_URL = 'https://data.gishub.org/duckdb/cities.csv'
+
+# 人口篩選預設範圍
+MIN_POP_DEFAULT = 100000
+MAX_POP_DEFAULT = 5000000
+MAX_POP_SLIDER = 15000000 
 
 # ----------------------------------------------------
 # 1. 狀態管理 (Reactive Variables)
@@ -17,10 +22,17 @@ selected_country = solara.reactive("TWN")
 data_df = solara.reactive(pd.DataFrame())
 status_message = solara.reactive("初始化中...")
 
+# ⭐ 新增：用於控制人口篩選範圍的響應式變數
+population_range = solara.reactive((MIN_POP_DEFAULT, MAX_POP_DEFAULT)) 
+# ⭐ 新增：用於儲存當前國家實際人口 MIN/MAX 的響應式變數
+country_pop_bounds = solara.reactive((0, MAX_POP_SLIDER)) 
+
+
 # ----------------------------------------------------
-# 2. 數據獲取邏輯 (不變)
+# 2. 數據獲取邏輯
 # ----------------------------------------------------
 
+# A. 載入所有國家清單 (不變)
 def load_country_list():
     status_message.set("正在載入國家列表...")
     try:
@@ -28,28 +40,76 @@ def load_country_list():
         con.install_extension("httpfs")
         con.load_extension("httpfs")
         
-        rows = con.sql(f"""
+        result = con.sql(f"""
             SELECT DISTINCT country 
             FROM '{CITIES_CSV_URL}'
             ORDER BY country;
         """).fetchall()
         
-        all_countries.set([r[0] for r in rows])
-        
-        if not all_countries.value:
-             status_message.set("警告：國家列表為空。")
+        all_countries.set([r[0] for r in result])
+        status_message.set("國家列表載入完成")
              
         con.close()
     except Exception as e:
-        status_message.set(f"錯誤：無法載入國家列表 {e}")
+        status_message.set(f"錯誤：載入國家列表失敗 ({e})")
 
+# ⭐ B. 新增：載入選定國家的人口邊界 (MIN/MAX)
+def load_country_pop_bounds():
+    code = selected_country.value
+    if not code:
+        country_pop_bounds.set((0, MAX_POP_SLIDER))
+        return
+
+    try:
+        con = duckdb.connect()
+        con.install_extension("httpfs")
+        con.load_extension("httpfs")
+
+        # 查詢當前國家的實際人口範圍
+        result = con.sql(f"""
+            SELECT MIN(population), MAX(population)
+            FROM '{CITIES_CSV_URL}'
+            WHERE country = '{code}';
+        """).fetchone()
+
+        con.close()
+
+        min_pop = int(result[0]) if result[0] is not None else 0
+        max_pop = int(result[1]) if result[1] is not None else MAX_POP_SLIDER
+
+        # 將最大值向上取整到最近的 10萬，以獲得更美觀的 Slider 範圍
+        max_pop_rounded = int(np.ceil(max_pop / 100000.0)) * 100000
+        if max_pop_rounded < 100000: max_pop_rounded = 100000
+        
+        country_pop_bounds.set((min_pop, max_pop_rounded))
+        
+        # 關鍵：重設 population_range 的值，避免當前範圍超出新邊界
+        current_min, current_max = population_range.value
+        
+        new_min = max(min_pop, current_min)
+        new_max = min(max_pop_rounded, current_max)
+        
+        # 如果新範圍無效，則重設為預設或新的最大值
+        if new_min > new_max:
+             population_range.set((min_pop, max_pop_rounded))
+        else:
+             population_range.set((new_min, new_max))
+        
+    except Exception as e:
+        print(f"Error loading bounds: {e}")
+        country_pop_bounds.set((0, MAX_POP_SLIDER))
+
+
+# C. 根據選中的國家篩選城市數據 (邏輯不變，但依賴於 population_range)
 def load_filtered_data():
     code = selected_country.value
+    min_pop, max_pop = population_range.value 
+    
     if not code:
         data_df.set(pd.DataFrame())
         return 
         
-    status_message.set(f"正在查詢 {code} 的城市數據...")
+    status_message.set(f"正在查詢 {code} (人口 {min_pop:,} - {max_pop:,})...")
     try:
         con = duckdb.connect()
         con.install_extension("httpfs")
@@ -59,6 +119,7 @@ def load_filtered_data():
         SELECT name, country, population, latitude, longitude
         FROM '{CITIES_CSV_URL}'
         WHERE country = '{code}'
+          AND population BETWEEN {min_pop} AND {max_pop} 
         ORDER BY population DESC
         LIMIT 200;
         """
@@ -68,7 +129,7 @@ def load_filtered_data():
         df_result["longitude"] = df_result["longitude"].astype(float)
         
         data_df.set(df_result)
-        status_message.set(f"{code} 已載入 {len(df_result)} 筆城市資料")
+        status_message.set(f"成功：載入 {code} 的 {len(df_result)} 筆城市資料")
                 
         con.close()
     except Exception as e:
@@ -76,22 +137,20 @@ def load_filtered_data():
         data_df.set(pd.DataFrame())
 
 # -----------------------------------------------------------
-## 🗺️ 地圖元件
+# 3. 視覺化組件 (保持不變)
 # -----------------------------------------------------------
 @solara.component
 def CityMap(df: pd.DataFrame):
-
+    
     m = solara.use_memo(
         lambda: leafmap.Map(
-            zoom=2,
-            center=[0, 0], 
+            zoom=2, center=[0, 0], 
             add_sidebar=True,
             sidebar_visible=True,
         ),
         []
     )
     
-    # 設置底圖和控制項
     if not hasattr(m, '_initialized_base_layers'):
         m.add_basemap("Esri.WorldImagery", before_id=m.first_symbol_layer_id, visible=False)
         m.add_draw_control(controls=["polygon", "trash"])
@@ -101,10 +160,11 @@ def CityMap(df: pd.DataFrame):
 
     def update_layer():
         LAYER = "city_points"
-        
-        # 移除舊圖層 (僅移除 Layer，不移除 Source)
+        SOURCE = "city_source"
+
         try:
             m.remove_layer(LAYER)
+            m.remove_source(SOURCE)
         except Exception:
             pass
 
@@ -114,7 +174,6 @@ def CityMap(df: pd.DataFrame):
         features = []
         lats, lons = [], []
         
-        # 轉換 GeoJSON
         for index, row in df.iterrows():
             try:
                 lon, lat = float(row["longitude"]), float(row["latitude"])
@@ -141,39 +200,47 @@ def CityMap(df: pd.DataFrame):
             status_message.set(f"警告：所有城市數據轉換失敗，未繪製點位 (代碼: {selected_country.value})。")
             return
             
-        # ⭐ 關鍵修正：替換為單一 m.add_geojson 呼叫
-        # 嘗試使用 layer_name 來確保 remove_layer 能夠工作
-        m.add_geojson(
-            geojson
-        )
+        m.add_source(SOURCE, geojson)
+        m.add_layer({
+            "id": LAYER,
+            "type": "circle",
+            "source": SOURCE,
+            "paint": {
+                "circle-radius": 6,
+                "circle-color": "red",
+                "circle-opacity": 0.9,
+            },
+        })
 
-        # 自動 zoom to bounds
         if len(lats) > 0:
             min_lat, max_lat = min(lats), max(lats)
             min_lon, max_lon = min(lons), max(lons)
             m.fit_bounds([[min_lon, min_lat], [max_lon, max_lat]])
-            
-        status_message.set(f"成功：已找到 {len(features)} 個城市點位！ (代碼: {selected_country.value})")
 
     solara.use_effect(update_layer, [df]) 
     return m.to_solara()
 
 
 # -----------------------------------------------------------
-## 📑 Solara Page() 
+# 4. 主頁面組件
 # -----------------------------------------------------------
 @solara.component
 def Page():
 
-    # 初始化
+    # 執行數據載入邏輯
     solara.use_effect(load_country_list, [])
-    solara.use_effect(load_filtered_data, [selected_country.value])
+    # ⭐ 新增：監聽國家變化，載入新的邊界
+    solara.use_effect(load_country_pop_bounds, [selected_country.value]) 
+    # ⭐ 監聽國家和範圍變化，載入過濾數據
+    solara.use_effect(load_filtered_data, [selected_country.value, population_range.value])
 
-    # 檢查是否在載入中
     if not all_countries.value and status_message.value != "國家列表載入完成":
          return solara.Info("正在載入國家清單...")
 
-    # 城市表格 (僅在數據非空時顯示)
+    # 獲取動態邊界
+    min_available_pop, max_available_pop = country_pop_bounds.value
+    
+    # 城市表格
     city_table = None
     df = data_df.value
     if not df.empty:
@@ -198,12 +265,23 @@ def Page():
             value=selected_country,
             values=all_countries.value
         ),
+        
+        # ⭐ 動態人口範圍 Slider
+        solara.IntRangeSlider(
+            label=f"人口範圍 (人): {population_range.value[0]:,} - {population_range.value[1]:,}",
+            value=population_range,
+            min=min_available_pop,   # 綁定動態最小值
+            max=max_available_pop,   # 綁定動態最大值
+            step=50000
+        ),
+        
         solara.Markdown(f"**狀態：** {status_message.value}"),
 
         solara.Markdown("---"),
-         # 2. 表格
-        city_table,
-        # 3. 地圖
+        
+        # 2. 地圖
         CityMap(data_df.value),
         
+        # 3. 表格
+        city_table,
     ])
