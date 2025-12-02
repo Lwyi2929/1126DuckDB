@@ -112,7 +112,8 @@ def CityMap(df: pd.DataFrame):
         
         if df.empty: return
 
-        features = []; lats, lons = []
+        features = []
+        lats, lons = [], []
         for index, row in df.iterrows():
             try: lon, lat = float(row["longitude"]), float(row["latitude"])
             except Exception: continue
@@ -120,7 +121,10 @@ def CityMap(df: pd.DataFrame):
             features.append({
                 "type": "Feature",
                 "geometry": {"type": "Point", "coordinates": [lon, lat]},
-                "properties": {"name": row["name"], "population": row["population"]},
+                "properties": {
+                    "name": row["name"],
+                    "country": row["country"],
+                }
             })
         geojson = {"type": "FeatureCollection", "features": features}
 
