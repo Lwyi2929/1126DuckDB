@@ -133,8 +133,8 @@ def CityMap(df: pd.DataFrame):
             return
             
         # ⭐ 核心修正 1: 移除集群參數
-        m.add_source(SOURCE, geojson) 
-
+        m.add_source(geojson) 
+        
         # ⭐ 核心修正 2: 繪製單一圓點圖層
         m.add_layer({
             "id": SINGLE_POINT_LAYER,
@@ -145,6 +145,7 @@ def CityMap(df: pd.DataFrame):
                 "circle-radius": 6,
                 "circle-color": "red",
                 "circle-opacity": 0.9,
+                
             }
         })
 
