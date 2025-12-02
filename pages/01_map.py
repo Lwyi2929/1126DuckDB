@@ -169,36 +169,60 @@ def CityMap(df: pd.DataFrame):
     return m.to_solara()
 
 # -----------------------------------------------------------
+# -----------------------------------------------------------
+# 4. 主頁面組件 (Page)
+# -----------------------------------------------------------
 @solara.component
 def Page():
 
+    # 執行數據載入邏輯 (不變)
     solara.use_effect(load_country_list, [])
     solara.use_effect(load_country_pop_bounds, [selected_country.value]) 
-    # ⭐ 監聽 population_range.value 變化
     solara.use_effect(load_filtered_data, [selected_country.value, population_range.value])
 
     if not all_countries.value and status_message.value != "國家列表載入完成":
          return solara.Info("正在載入國家清單...")
 
+    # --- ⭐ 修正點：安全檢查並解包 population_range ---
+    current_range = population_range.value
+    
+    # 檢查是否為有效的範圍元組 (例如長度為 2 的 tuple/list)
+    if not isinstance(current_range, (tuple, list)) or len(current_range) < 2:
+        # 如果格式錯誤，返回一個載入訊息或預設值，直到 load_country_pop_bounds 修正它
+        print(f"Warning: population_range is not a valid tuple: {current_range}")
+        return solara.Info("等待人口範圍數據初始化...")
+
+    min_val = current_range[0]
+    max_val = current_range[1]
+    
     min_available_pop, max_available_pop = country_pop_bounds.value
     
-    city_table = None; df = data_df.value
+    # 城市表格 (不變)
+    city_table = None
+    df = data_df.value
+    # ... (表格渲染邏輯不變) ...
     if not df.empty:
         df_for_table = df[['name', 'country', 'latitude', 'longitude', 'population']].rename(
             columns={'name': '城市名稱', 'country': '代碼', 'latitude': '緯度', 'longitude': '經度', 'population': '人口'}
         )
         city_table = solara.Column([solara.Markdown("### 城市清單與座標詳情"), solara.DataTable(df_for_table)])
     
+    
+    # 組合頁面佈局
     return solara.Column([
 
         solara.Card(title="城市數據篩選與狀態", elevation=2),
 
-        solara.Select(label="選擇國家代碼", value=selected_country, values=all_countries.value),
+        # 1. 控制項和狀態
+        solara.Select(
+            label="選擇國家代碼",
+            value=selected_country,
+            values=all_countries.value
+        ),
         
-        # ⭐ 核心修正：使用 solara.SliderInt 並傳遞 tuple value
+        # ⭐ 修正點：使用安全解包的 min_val 和 max_val 變數
         solara.SliderInt(
-            # 顯示當前範圍
-            label=f"人口篩選範圍 (人): {population_range.value[0]:,} - {population_range.value[1]:,}",
+            label=f"人口篩選範圍 (人): {min_val:,} - {max_val:,}",
             value=population_range,
             min=min_available_pop,   
             max=max_available_pop,   
@@ -206,6 +230,7 @@ def Page():
         ),
         
         solara.Markdown(f"**狀態：** {status_message.value}"),
+
         solara.Markdown("---"),
         
         CityMap(data_df.value),
