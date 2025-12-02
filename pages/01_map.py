@@ -125,65 +125,48 @@ def CityMap(df: pd.DataFrame):
 # -----------------------------------------------------------
 # 4. Solara 主頁面
 # -----------------------------------------------------------
+# 4. 主頁面組件
+# -----------------------------------------------------------
 @solara.component
 def Page():
 
-    # 執行數據載入邏輯
-    solara.use_effect(load_country_list, [])
-    # ⭐ 監聽國家和人口門檻的變化
-    solara.use_effect(load_filtered_data, [selected_country.value, population_threshold.value])
+    solara.use_effect(load_global_pop_bounds, []) 
+    solara.use_effect(load_filtered_data, [min_pop_value.value, max_pop_value.value])
 
-    if not all_countries.value and status_message.value.startswith("正在載入"):
-         return solara.Info("正在載入國家清單...")
+    min_available_pop, max_available_pop = country_pop_bounds.value
+    
+    # 檢查是否仍在載入初始邊界
+    if max_available_pop == MAX_POP_SLIDER and status_message.value.startswith("正在載入"):
+         return solara.Info("正在載入全域人口邊界...")
 
-    # 城市表格 (若超過 300 筆則限制顯示)
+    # 城市表格
     city_table = None
     df = data_df.value
     if not df.empty:
-        num_records = len(df)
-        warning_message = None
-        
-        if num_records > 300:
-            df_to_display = df.head(100)
-            warning_message = solara.Warning(f"資料量超過 300 筆 ({num_records} 筆)。表格僅顯示前 100 筆記錄。", dense=True)
-        else:
-            df_to_display = df
-
-        df_for_table = df_to_display[['name', 'country', 'latitude', 'longitude', 'population']].rename(
+        # ... (表格創建邏輯) ...
+        df_for_table = df[['name', 'country', 'latitude', 'longitude', 'population']].rename(
             columns={'name': '城市名稱', 'country': '代碼', 'latitude': '緯度', 'longitude': '經度', 'population': '人口'}
         )
-        
-        children = [
-            solara.Markdown("### 城市清單與座標詳情"),
-            warning_message,
-            solara.DataTable(df_for_table)
-        ]
-        city_table = solara.Column([child for child in children if child is not None])
+        city_table = solara.Column([solara.Markdown("### 城市清單與座標詳情"), solara.DataTable(df_for_table)])
     
-    # 組合頁面佈局
-    return solara.Column([
+    
+    # 組合所有元件的列表
+    main_components = [
+        solara.Card(title="城市數據篩選與狀態", elevation=2),
 
-        solara.Card(title="城市數據篩選器", elevation=2, children=[
-            solara.Select(
-                label="選擇國家",
-                value=selected_country,
-                values=all_countries.value
-            ),
-            # ⭐ 人口門檻 Slider
-            solara.SliderInt(
-                label="人口下限",
-                value=population_threshold,
-                min=0,
-                max=MAX_POP_SLIDER,
-                step=100_000 # 步進 10 萬
-            ),
-            solara.Markdown(f"目前人口門檻：**{population_threshold.value:,}**"),
-            solara.Markdown(f"**狀態：** {status_message.value}"),
-        ]),
+        # 1. 控制項
+        solara.SliderInt(label=f"最低人口 (人): {min_pop_value.value:,}", value=min_pop_value, min=min_available_pop, max=max_available_pop, step=50000),
+        solara.SliderInt(label=f"最高人口 (人): {max_pop_value.value:,}", value=max_pop_value, min=min_available_pop, max=max_available_pop, step=50000),
         
+        solara.Markdown(f"**狀態：** {status_message.value}"),
         solara.Markdown("---"),
         
+        # 2. 地圖
         CityMap(data_df.value),
         
-        city_table,
-    ])
+        # 3. 表格 (只有當 city_table 被賦值時才會被包含)
+        city_table, 
+    ]
+    
+    # ⭐ 關鍵修正：確保在傳入 children 列表時，所有 None 值被過濾
+    return solara.Column([item for item in main_components if item is not None])
