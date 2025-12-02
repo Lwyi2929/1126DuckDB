@@ -11,7 +11,7 @@ CITIES_CSV_URL = 'https://data.gishub.org/duckdb/cities.csv'
 
 all_countries = solara.reactive([])
 selected_country = solara.reactive("")
-population_threshold = solara.reactive(1_000_000)   # 人口門檻
+population_threshold = solara.reactive(1_000_000)  # 人口門檻
 
 data_df = solara.reactive(pd.DataFrame())
 
