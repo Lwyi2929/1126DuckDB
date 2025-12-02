@@ -103,7 +103,7 @@ def CityMap(df: pd.DataFrame):
     )
     
     # 設置底圖和控制項
-    m.add_basemap("Esri.WorldImagery", before_id=m.first_symbol_layer_id)
+    m.add_basemap("OpenStreetMap", before_id=m.first_symbol_layer_id)
 
     # 轉成 GeoJSON
     features = []
